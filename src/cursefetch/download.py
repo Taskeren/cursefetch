@@ -31,16 +31,16 @@ def uncompress_zip(zip_path: str, destination: str):
     if not os.path.exists(destination):
         os.makedirs(destination)
 
-    with zipfile.ZipFile(zip_path, "r") as zip:
+    with zipfile.ZipFile(zip_path, "r") as zip_:
         # calculate the total size of the files in the zip for progress tracking
-        total_size = sum(file.file_size for file in zip.infolist())
+        total_size = sum(file.file_size for file in zip_.infolist())
         with tqdm(
             total=total_size,
             unit = "B",
             unit_scale=True,
             desc=f"Uncompressing {zip_path}",
         ) as bar:
-            for file in zip.infolist():
+            for file in zip_.infolist():
                 # construct the full path for the extracted file
                 target_path = os.path.join(destination, file.filename)
                 # ensure the target directory exists
@@ -49,7 +49,7 @@ def uncompress_zip(zip_path: str, destination: str):
                 if file.is_dir():
                     continue
                 # read and write the file in chunks to show progress
-                with zip.open(file) as source, open(target_path, "wb") as target:
+                with zip_.open(file) as source, open(target_path, "wb") as target:
                     while True:
                         chunk = source.read(64 * 1024)
                         if not chunk:
