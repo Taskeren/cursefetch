@@ -1,7 +1,7 @@
 [project]
 name = "cursefetch"
 version = "0.1.0"
-description = "Add your description here"
+description = "Yet another tool to fetch files from CurseForge."
 readme = "README.md"
 authors = [
     { name = "Taskeren", email = "r0yalist@outlook.com" }
