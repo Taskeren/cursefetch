@@ -2,10 +2,13 @@ import json
 import os
 from typing import Literal
 
+from dacite import from_dict
 import requests
 
+from cursefetch.datastruct import File, PagedResponse
 
-def get_version_list(project_id: str) -> list:
+
+def get_version_list(project_id: str) -> list[File]:
     """
     Fetches the list of all versions for a given CurseForge project ID.
     :param project_id: The ID of the CurseForge project to fetch versions for.
@@ -18,24 +21,24 @@ def get_version_list(project_id: str) -> list:
     if api_key is None:
         raise ValueError("CF_API_KEY environment variable is not set.")
 
-    all = []
+    all: list[File] = []
     try:
         resp = requests.get(url, headers={"X-API-KEY": api_key})
         resp.raise_for_status()
-        data = resp.json()
-        if "data" in data and len(data["data"]) > 0:
-            all.extend(data["data"])
+        data = from_dict(data_class=PagedResponse[File], data=resp.json())
+        if len(data.data) > 0:
+            all.extend(data.data)
         else:
             raise ValueError("Unable to find any files for the given project ID.")
-        while "pagination" in data and len(all) < data["pagination"]["totalCount"]:
+        while len(all) < data.pagination.totalCount:
             # fetch all pages until we have all the data
             resp = requests.get(
-                f"{url}&index={data['pagination']['index'] + PER_REQUEST_COUNT}",
+                f"{url}&index={data.pagination.index + PER_REQUEST_COUNT}",
                 headers={"X-API-KEY": api_key},
             )
             resp.raise_for_status()
-            data = resp.json()
-            all.extend(data["data"])
+            data = from_dict(data_class=PagedResponse[File], data=resp.json())
+            all.extend(data.data)
         return all
     except requests.RequestException as e:
         print(f"Error fetching data from CurseForge API: {e}")
@@ -46,10 +49,10 @@ def get_version_list(project_id: str) -> list:
 
 
 def select_latest_version(
-    version_list: list,
+    version_list: list[File],
     release_type: Literal["release", "beta", "alpha", 1, 2, 3] | None = None,
     order_by: Literal["default", "semver"] = "default",
-) -> dict:
+) -> File:
     """
     Select the latest version from a list of versions, optionally filtering by release type and ordering by semver.
     :param version_list: The list of versions to select from.
@@ -65,7 +68,7 @@ def select_latest_version(
 
     # filter the list by releaseType if it's not None
     if release_type is not None:
-        version_list = [v for v in version_list if v["releaseType"] == release_type]
+        version_list = [v for v in version_list if v.releaseType == release_type]
         if len(version_list) == 0:
             raise ValueError("No versions found for the given release type.")
 
@@ -73,7 +76,7 @@ def select_latest_version(
         from packaging.version import InvalidVersion, Version
 
         try:
-            return max(version_list, key=lambda v: Version(v["displayName"]))
+            return max(version_list, key=lambda v: Version(v.displayName))
         except InvalidVersion:
             # there's a version that doesn't follow semver, so we can't sort by semver
             # FIXME: However, we used a package that may not fully support semver, so find a workaround when someone needs.

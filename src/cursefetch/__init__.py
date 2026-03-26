@@ -3,10 +3,12 @@ import json
 import os
 import sys
 import traceback
+from typing import Literal
 
 from packaging.version import InvalidVersion
 
 import cursefetch.cursefetch as cf
+from cursefetch.datastruct import File
 
 from . import download
 
@@ -76,30 +78,30 @@ def main() -> None:
         os.environ["CF_API_KEY"] = args.api_key
 
     if args.command == "list-version":
-        command_list_version(args)
+        _command_list_version(args)
     elif args.command == "download":
-        command_download(args)
+        _command_download(args)
     else:
         argparser.print_help()
 
 
-def command_list_version(args):
+def _command_list_version(args):
     try:
         list = cf.get_version_list(args.project_id)
         if args.details:
             print(json.dumps(list, indent=2))
         else:
-            print_version_list_simple(list)
+            _print_version_list_simple(list)
     except Exception as e:
         print("Failed to fetch version list.")
         traceback.print_exception(e)
 
 
-def print_version_list_simple(version_list: list) -> None:
+def _print_version_list_simple(version_list: list[File]) -> None:
     # calculate the maximum length of the id, name, and release type fields for formatting
-    id_max_length = max(len(str(v["id"])) for v in version_list)
-    name_max_length = max(len(v["displayName"]) for v in version_list)
-    file_date_max_length = max(len(str(v["fileDate"])) for v in version_list)
+    id_max_length = max(len(str(v.id)) for v in version_list)
+    name_max_length = max(len(v.displayName) for v in version_list)
+    file_date_max_length = max(len(str(v.fileDate)) for v in version_list)
 
     def release_type_to_str(
         release_type: int | str, dict={1: "release", 2: "beta", 3: "alpha"}
@@ -109,74 +111,93 @@ def print_version_list_simple(version_list: list) -> None:
         return release_type
 
     for v in version_list:
-        id = str(v["id"]).rjust(id_max_length)
-        name = str(v["displayName"]).ljust(name_max_length)
-        release_type = release_type_to_str(v["releaseType"])
+        id = str(v.id).rjust(id_max_length)
+        name = str(v.displayName).ljust(name_max_length)
+        release_type = release_type_to_str(v.releaseType)
         # the length of "release" and "unknown" is 7
         release_type = release_type.rjust(7)
-        file_date = str(v["fileDate"]).ljust(file_date_max_length)
+        file_date = str(v.fileDate).ljust(file_date_max_length)
         print(f"({id})  {name}  {release_type}  {file_date}")
 
 
-def command_download(args):
+def _command_download(args):
     try:
-        version = args.version
-        # the selected version info dict
-        version_info = None
-
-        # grab the version list
-        list = None
+        version_info: File | None = None
         try:
-            list = cf.get_version_list(args.project_id)
-        except:
-            sys.exit("Failed to fetch the version list for the given project ID.")
+            version_info = get_project_file(
+                args.project_id, args.version, args.release_type, args.version_order
+            )
+        except ValueError as e:
+            sys.exit(str(e))
 
-        if version == "latest":
-            # handle latest version selection
-            try:
-                version_info = cf.select_latest_version(
-                    list, release_type=args.release_type, order_by=args.version_order
-                )
-            except InvalidVersion as e:
-                sys.exit(
-                    "The project contains versions that do not follow semantic versioning (SemVer), and cannot order by semver."
-                )
-            except:
-                sys.exit("Failed to select the latest version.")
-        else:
-            # or find the version by name or id
-            for v in list:
-                if v["displayName"] == version or str(v["id"]) == version:
-                    version_info = v
-                    break
-
-        # fast fail if we couldn't find the version
-        if version_info is None:
-            sys.exit("Failed to find a version matching the specified criteria.")
-
-        # dump simulation info and return
         if args.simulate_version_selection:
             print("Selected version")
-            print_version_list_simple([version_info])
+            _print_version_list_simple([version_info])
             return
 
         # show the selected version info
-        print(f"Version: {version_info['displayName']} (id: {version_info['id']})")
-
-        # download the file
-        output_path = args.output if not args.uncompress else "temp_download.zip"
-        try:
-            download.download_url(version_info["downloadUrl"], output_path)
-        except:
-            sys.exit("Failed to download the version.")
-
-        # uncompress the file if requested
-        if args.uncompress:
-            try:
-                download.uncompress_zip(output_path, args.output)
-            except:
-                sys.exit("Failed to uncompress the downloaded file.")
-
+        print(f"Version: {version_info.displayName} (id: {version_info.id})")
+        download_project_file(version_info, args.output, args.uncompress)
     except Exception as e:
         print("Failed to download the version.")
         traceback.print_exception(e)
+
+
+def get_project_file(
+    project_id: str,
+    version: str,
+    release_type: Literal["release", "beta", "alpha"],
+    order_by: Literal["default", "semver"],
+) -> File:
+    version_list = None
+    try:
+        version_list = cf.get_version_list(project_id)
+    except:
+        raise ValueError("Failed to fetch the version list for the given project ID.")
+
+    version_info: File | None = None
+    if version == "latest":
+        # handle latest version selection
+        try:
+            version_info = cf.select_latest_version(
+                version_list, release_type, order_by
+            )
+        except InvalidVersion as e:
+            raise ValueError(
+                "The project contains versions that do not follow semantic versioning (SemVer), and cannot order by semver."
+            )
+        except:
+            raise ValueError("Failed to select the latest version.")
+    else:
+        # or find the version by name or id
+        for version in version_list:
+            if version.displayName == version or str(version.id) == version:
+                version_info = version
+                break
+
+    # fast fail if we couldn't find the version
+    if version_info is None:
+        raise ValueError("Failed to find a version matching the specified criteria.")
+
+    return version_info
+
+
+def download_project_file(version_info: File, output_path: str, uncompress: bool):
+    # make sure the output path is valid
+    if output_path is None:
+        output_path = version_info.fileName
+
+    # the path where the downloaded file will be saved
+    # if uncompress = true, we will first download to a temporary file and then uncompress it to the output directory
+    download_path = output_path if not uncompress else "temp_download.zip"
+    try:
+        download.download_url(version_info.downloadUrl, download_path)
+    except:
+        raise ValueError("Failed to download the version.")
+
+    # uncompress the file if requested
+    if uncompress:
+        try:
+            download.uncompress_zip(download_path, output_path)
+        except:
+            raise ValueError("Failed to uncompress the downloaded file.")
