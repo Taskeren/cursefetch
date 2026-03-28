@@ -1,6 +1,6 @@
 [project]
 name = "cursefetch"
-version = "0.2.1"
+version = "0.2.2"
 description = "Yet another tool to fetch files from CurseForge."
 readme = "README.md"
 authors = [

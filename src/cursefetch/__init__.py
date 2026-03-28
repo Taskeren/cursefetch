@@ -2,7 +2,9 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import traceback
+from pathlib import Path
 from typing import Literal
 
 from packaging.version import InvalidVersion
@@ -137,7 +139,10 @@ def _command_download(args):
 
         # show the selected version info
         print(f"Version: {version_info.displayName} (id: {version_info.id})")
-        download_project_file(version_info, args.output, args.uncompress)
+        if args.uncompress:
+            download_project_file_and_uncompress(version_info, args.output)
+        else:
+            download_project_file(version_info, args.output, False)
     except Exception as e:
         print("Failed to download the version.")
         traceback.print_exception(e)
@@ -201,3 +206,25 @@ def download_project_file(version_info: File, output_path: str, uncompress: bool
             uncompress_zip(download_path, output_path)
         except:
             raise ValueError("Failed to uncompress the downloaded file.")
+
+
+def download_project_file_and_uncompress(version_info: File, uncompress_path: str):
+    # make sure the output path is valid
+    if uncompress_path is None:
+        uncompress_path = version_info.fileName
+
+    fd, zip_path = tempfile.mkstemp(suffix=".zip")
+    try:
+        download_url(version_info.downloadUrl, zip_path)
+    except:
+        raise ValueError("Failed to download the version.")
+    try:
+        uncompress_zip(zip_path, uncompress_path)
+    except:
+        raise ValueError("Failed to uncompress the downloaded file.")
+    # clean up the temporary file
+    try:
+        os.close(fd)
+        Path(zip_path).unlink(missing_ok=True)
+    except PermissionError:
+        print(f"Failed to remove the temporary file: {zip_path}")
